@@ -9,11 +9,3 @@
 /Build/*.data.gz
   Content-Encoding: gzip
   Content-Type: application/octet-stream
-
-/Build/*.framework.js.gz
-  Content-Encoding: gzip
-  Content-Type: application/javascript
-
-/Build/*.loader.js.gz
-  Content-Encoding: gzip
-  Content-Type: application/javascript
