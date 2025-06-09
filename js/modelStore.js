@@ -9,40 +9,40 @@ const ModelStore = {
         'Cerdo': {
             nombre: 'Cerdo',
             url: './assets/models/cerdo.glb',
-            scale: '1 1 1',
-            position: '0 0 0'
-        }
+            scale: '0.6 0.6 0.6',
+            position: '0 0.68 0'
+        },
 
         /*         Toca estandatizar los modelos para que tengan la misma escala y posición -
                      eso se hace con un editor como Blender*/
 
-             /*        
+                    
         'Conejo': {
             nombre: 'Conejo',
             url: './assets/models/conejo.glb',
-            scale: '1.5 1.5 1.5',
-            position: '0 0 0'
+            scale: '1 1 1',
+            position: '0 -0.65 -5.45'
         },
         'Filtro': {
             nombre: 'Filtro',
             url: './assets/models/filtro.glb',
-            scale: '1 1 1',
-            position: '0 0 0'
+            scale: '0.5 0.5 0.5',
+            position: '-2.8 0.5 3'
         },
         'Gallina': {
             nombre: 'Gallina',
             url: './assets/models/gallina.glb',
-            scale: '1.5 1.5 1.5',
-            position: '0 0 0'
+            scale: '0.5 0.5 0.5',
+            position: '0 1 0'
         },
         'Tanque': {
             nombre: 'Tanque',
             url: './assets/models/tanque.glb',
-            scale: '1 1 1',
+            scale: '0.065 0.065 0.065',
             position: '0 0 0'
         }
-    },*/
     },
+
     escenarios: {
         'escena1': {
             nombre: 'Escena 1',
