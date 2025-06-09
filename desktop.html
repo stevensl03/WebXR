@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Visualizador 3D - Escritorio</title>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script src="./js/modelStore.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+        }
+        #viewer-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #controls-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .control-btn {
+            background: #444;
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .control-btn:hover {
+            background: #666;
+        }
+    </style>
+</head>
+<body>
+    <div id="viewer-container"></div>
+    <div id="controls-panel">
+        <button class="control-btn" id="resetView">Reset Vista</button>
+        <button class="control-btn" id="toggleRotate">Auto Rotar</button>
+        <button class="control-btn" id="toggleLight">Ajustar Luz</button>
+    </div>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        async function init() {
+            const params = new URLSearchParams(window.location.search);
+            const modeloId = params.get('modelo') || 'Capibara';
+            const escenarioId = params.get('escenario') || 'miCasa';
+
+            const modelo = ModelStore.getModelo(modeloId);
+            const escenario = ModelStore.getEscenario(escenarioId);
+
+            console.log('Modelo:', modelo);
+            console.log('Escenario:', escenario);
+
+            // Inicializar Three.js
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('viewer-container').appendChild(renderer.domElement);
+
+            // Controles orbitales
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Configurar la cámara
+            camera.position.set(0, 1.6, 3);
+            camera.lookAt(0, 0, 0);
+
+            // Cargar el escenario 360
+            if (escenario) {
+                const textureLoader = new THREE.TextureLoader();
+                const texture = await new Promise((resolve) => 
+                    textureLoader.load(escenario.url, resolve));
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                scene.background = texture;
+                scene.environment = texture;
+            }
+
+            // Mejorar iluminación
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); // Reducida de 0.5 a 0.3
+            scene.add(ambientLight);
+
+            const mainLight = new THREE.DirectionalLight(0xffffff, 0.7); // Reducida de 0.8 a 0.7
+            mainLight.position.set(5, 5, 5);
+            mainLight.castShadow = true;
+            scene.add(mainLight);
+
+            // Luz de relleno suave
+            const fillLight = new THREE.DirectionalLight(0x9ba0ff, 0.2);
+            fillLight.position.set(-5, 0, -5);
+            scene.add(fillLight);
+
+            // Habilitar sombras
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // Crear plataforma verde
+            const platformGeometry = new THREE.CircleGeometry(2, 32);
+            const platformMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x2d5a27,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+            platform.rotation.x = -Math.PI / 2;
+            platform.position.y = -0.01; // Ligeramente debajo del modelo
+            platform.receiveShadow = true;
+            scene.add(platform);
+
+            // Mejorar controles orbitales
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.rotateSpeed = 0.8;
+            controls.zoomSpeed = 0.7;
+            controls.minDistance = 2;
+            controls.maxDistance = 10;
+            controls.maxPolarAngle = Math.PI / 1.5;
+            
+            let autoRotate = false;
+
+            // Cargar el modelo 3D
+            if (modelo) {
+                try {
+                    const loader = new GLTFLoader();
+                    const gltf = await new Promise((resolve, reject) => {
+                        loader.load(modelo.url, resolve, undefined, reject);
+                    });
+                    const model = gltf.scene;
+
+                    // Aplicar transformaciones
+                    const [x, y, z] = modelo.position.split(' ').map(Number);
+                    const [sx, sy, sz] = modelo.scale.split(' ').map(Number);
+                    
+                    model.position.set(x, y, z);
+                    model.scale.set(sx, sy, sz);
+                    
+                    // Habilitar sombras en el modelo
+                    model.traverse((node) => {
+                        if (node.isMesh) {
+                            node.castShadow = true;
+                            node.receiveShadow = true;
+                            // Reducir el brillo de los materiales
+                            if (node.material) {
+                                node.material.roughness = 0.7;
+                                node.material.metalness = 0.2;
+                            }
+                        }
+                    });
+                    
+                    scene.add(model);
+                } catch (error) {
+                    console.error('Error cargando el modelo:', error);
+                }
+            }
+
+            // Controles de interfaz
+            document.getElementById('resetView').addEventListener('click', () => {
+                camera.position.set(0, 1.6, 3);
+                camera.lookAt(0, 0, 0);
+                controls.target.set(0, 0, 0);
+            });
+
+            document.getElementById('toggleRotate').addEventListener('click', () => {
+                autoRotate = !autoRotate;
+                controls.autoRotate = autoRotate;
+            });
+
+            document.getElementById('toggleLight').addEventListener('click', () => {
+                mainLight.intensity = mainLight.intensity === 0.7 ? 0.4 : 0.7;
+                fillLight.intensity = fillLight.intensity === 0.2 ? 0.3 : 0.2;
+            });
+
+            // Función de animación mejorada
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+
+            animate();
+        }
+
+        // Iniciar cuando el DOM esté listo
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>

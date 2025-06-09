@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Visualizador AR Móvil</title>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script src="./js/modelStore.js"></script>
+
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            touch-action: none; 
+        }
+        #ar-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            touch-action: none;
+            outline: none;
+        }
+        #ar-overlay {
+            position: fixed;
+            bottom: 80px; /* Aumentado de 20px a 80px para evitar superposición */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 20px;
+        }
+        .ar-btn {
+            background: rgba(255,255,255,0.9);
+            border: none;
+            padding: 12px;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none;
+            font-size: 20px; /* Aumentar tamaño de iconos */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); /* Añadir sombra para mejor visibilidad */
+        }
+        .ar-btn:active {
+            background: rgba(200,200,200,0.9); /* Feedback visual al tocar */
+        }
+        #placing-instructions {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            max-width: 80%;
+            font-size: 16px;
+        }
+        /* Estilo para el botón AR de WebXR */
+        #ARButton {
+            position: fixed !important;
+            bottom: 20px !important;
+            transform: translateX(-50%);
+            left: 50% !important;
+            padding: 12px 24px !important;
+            border-radius: 30px !important;
+            border: none !important;
+            background: rgba(0,0,0,0.8) !important;
+            color: white !important;
+            font-size: 16px !important;
+            z-index: 999 !important;
+        }
+        /* Add to your existing styles */
+        #Exit {
+            background: rgba(255, 70, 70, 0.9);
+            color: white;
+            font-size: 18px;
+            display: none; /* Hidden by default, shown when AR starts */
+        }
+
+        #Exit:active {
+            background: rgba(220, 50, 50, 0.9);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="ar-container"></canvas>
+    <div id="placing-instructions">
+        Mueve tu dispositivo para detectar superficies y toca para colocar el modelo
+    </div>
+    <div id="ar-overlay">
+        <button class="ar-btn" id="Exit">❌</button>
+        <button class="ar-btn" id="resetBtn">↺</button>
+        <button class="ar-btn" id="lightBtn">💡</button>
+        <button class="ar-btn" id="scaleUpBtn">+</button>
+        <button class="ar-btn" id="scaleDownBtn">-</button>
+    </div>
+
+    <script type="module">
+        // Importar librerías necesarias
+        import * as THREE from 'three';              // Librería principal Three.js
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';  // Cargador de modelos 3D
+        import { ARButton } from 'three/addons/webxr/ARButton.js';        // Botón para iniciar AR
+
+        // Obtener parámetros de la URL (modelo a cargar)
+        const params = new URLSearchParams(window.location.search);
+        const modeloId = params.get('modelo') || 'Capibara';  // Si no hay modelo especificado, usa Capibara
+        const modelo = ModelStore.getModelo(modeloId);        // Obtener datos del modelo desde ModelStore
+
+        // Variables de estado para el modelo y su posicionamiento
+        let currentModel = null;         // Referencia al modelo 3D actual
+        let isPlacing = true;           // Indica si estamos en modo de colocación
+        let canReposition = true;       // Permite reposicionar el modelo
+        let lastPosition = new THREE.Vector3();      // Última posición válida
+        let lastQuaternion = new THREE.Quaternion(); // Última rotación válida
+        let lastScale = new THREE.Vector3();         // Última escala válida
+
+        // Configuración de la escena Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,    // Suavizado de bordes
+            alpha: true,        // Fondo transparente para AR
+            canvas: document.getElementById('ar-container')
+        });
+
+        // Configuración del renderizador
+        renderer.setPixelRatio(window.devicePixelRatio);  // Ajuste para pantallas de alta densidad
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;  // Habilitar soporte para realidad aumentada
+
+        // Configuración del botón AR y sus características
+        document.body.appendChild(
+            ARButton.createButton(renderer, {
+                requiredFeatures: ['hit-test', 'dom-overlay'],  // Características requeridas
+                domOverlay: { root: document.getElementById('ar-overlay') },  // Overlay para controles
+                optionalFeatures: ['dom-overlay'],
+                sessionInit: {
+                    requiredFeatures: ['hit-test'],  // Detección de superficies
+                    optionalFeatures: ['dom-overlay']
+                }
+            })
+        );
+
+        // Variables para el sistema de detección de superficies
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+
+        // Constantes de configuración
+        const INITIAL_DISTANCE = 1.5;  // Distancia inicial del modelo a la cámara (metros)
+        const INITIAL_HEIGHT = 0.05;   // Altura inicial sobre la superficie (metros)
+        const INITIAL_SCALE = 0.5;     // Factor de escala inicial del modelo
+
+        // Indicador visual de carga
+        const loadingDiv = document.createElement('div');
+        loadingDiv.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 1000;
+        `;
+        loadingDiv.textContent = 'Cargando modelo...';
+        document.body.appendChild(loadingDiv);
+
+        // Función principal de inicialización
+        async function init() {
+            try {
+                // Configuración de luces
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);  // Luz ambiente suave
+                scene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);  // Luz direccional principal
+                directionalLight.position.set(5, 5, 5);
+                scene.add(directionalLight);
+
+                // Cargar el modelo 3D
+                const modelPromise = loadModel();
+                currentModel = await modelPromise;
+                
+                if (currentModel) {
+                    scene.add(currentModel);
+                    console.log('Modelo añadido a la escena');
+                }
+
+                // Configurar el bucle de animación
+                renderer.setAnimationLoop((timestamp, frame) => {
+                    if (frame) {
+                        const referenceSpace = renderer.xr.getReferenceSpace();
+
+                        if (!hitTestSourceRequested) {
+                            const session = renderer.xr.getSession();
+                            session.requestReferenceSpace('viewer').then((viewerSpace) => {
+                                session.requestHitTestSource({ space: viewerSpace }).then((source) => {
+                                    hitTestSource = source;
+                                });
+                            });
+                            hitTestSourceRequested = true;
+                            session.addEventListener('end', () => {
+                                hitTestSourceRequested = false;
+                                hitTestSource = null;
+                                if (currentModel) currentModel.visible = false;
+                            });
+                        }
+
+                        // Replace the hit-test section in the animation loop
+                        if (hitTestSource && (isPlacing || canReposition)) {
+                            const hitTestResults = frame.getHitTestResults(hitTestSource);
+                            if (hitTestResults.length > 0 && currentModel) {
+                                const hit = hitTestResults[0];
+                                const pose = hit.getPose(referenceSpace);
+                                
+                                // Crear matriz temporal
+                                const tempMatrix = new THREE.Matrix4();
+                                tempMatrix.fromArray(pose.transform.matrix);
+                                
+                                // Ajustar posición para estar más cerca y a una altura adecuada
+                                const position = new THREE.Vector3();
+                                position.setFromMatrixPosition(tempMatrix);
+                                
+                                // Obtener dirección de la cámara
+                                const cameraDirection = new THREE.Vector3(0, 0, -1);
+                                cameraDirection.applyQuaternion(camera.quaternion);
+                                
+                                // Ajustar posición
+                                position.add(cameraDirection.multiplyScalar(INITIAL_DISTANCE));
+                                position.y += INITIAL_HEIGHT;
+                                
+                                if (!currentModel.visible) {
+                                    currentModel.visible = true;
+                                    document.getElementById('placing-instructions').style.display = 'none';
+                                }
+                                
+                                // Aplicar transformación
+                                currentModel.position.copy(position);
+                                currentModel.quaternion.setFromRotationMatrix(tempMatrix);
+                            }
+                        }
+                    }
+                    renderer.render(scene, camera);
+                });
+
+                // Configurar controles de interfaz
+                setupControls(directionalLight);
+
+            } catch (error) {
+                console.error('Error initializing AR:', error);
+                loadingDiv.textContent = 'Error cargando el modelo';
+                setTimeout(() => loadingDiv.remove(), 2000);
+            }
+        }
+
+        // Función para cargar y optimizar el modelo 3D
+        async function loadModel() {
+            if (!modelo) return null;
+            
+            const loader = new GLTFLoader();
+            loader.setPath(modelo.url.substring(0, modelo.url.lastIndexOf('/') + 1));
+            
+            try {
+                const gltf = await loader.loadAsync(modelo.url.split('/').pop());
+                const model = gltf.scene;
+                
+                // Aplicar escala base más pequeña
+                const [sx, sy, sz] = modelo.scale.split(' ').map(Number);
+                model.scale.set(
+                    sx * INITIAL_SCALE, 
+                    sy * INITIAL_SCALE, 
+                    sz * INITIAL_SCALE
+                );
+                model.visible = false;
+                
+                // Optimizar geometrías para mejor rendimiento
+                model.traverse((node) => {
+                    if (node.isMesh) {
+                        node.geometry.computeBoundingSphere();
+                        node.frustumCulled = true;
+                    }
+                });
+                
+                console.log('Modelo cargado exitosamente');
+                return model;
+            } catch (error) {
+                console.error('Error cargando modelo:', error);
+                return null;
+            } finally {
+                loadingDiv.remove();
+            }
+        }
+
+        // Configuración de controles de interfaz
+        function setupControls(directionalLight) {
+            // Botón de reinicio: permite reposicionar el modelo
+            document.getElementById('resetBtn').addEventListener('click', () => {
+                canReposition = true;
+                isPlacing = true;
+                if (currentModel) {
+                    currentModel.visible = false;
+                }
+                document.getElementById('placing-instructions').style.display = 'block';
+                document.getElementById('placing-instructions').textContent = 
+                    'Toca donde quieras reposicionar el modelo';
+            });
+
+            // Control táctil: confirma la posición del modelo
+            document.addEventListener('touchstart', (event) => {
+                if ((isPlacing || canReposition) && currentModel && currentModel.visible) {
+                    isPlacing = false;
+                    canReposition = false;
+                    document.getElementById('placing-instructions').style.display = 'none';
+                }
+            });
+
+            // Control de iluminación: ajusta la intensidad de la luz
+            document.getElementById('lightBtn').addEventListener('click', () => {
+                directionalLight.intensity = directionalLight.intensity === 0.7 ? 0.4 : 0.7;
+            });
+
+            // Controles de escala: aumentar y disminuir tamaño
+            document.getElementById('scaleUpBtn').addEventListener('click', () => {
+                if (currentModel) {
+                    currentModel.scale.multiplyScalar(1.1); // Reducido de 1.2 a 1.1
+                }
+            });
+
+            document.getElementById('scaleDownBtn').addEventListener('click', () => {
+                if (currentModel) {
+                    currentModel.scale.multiplyScalar(0.9); // Aumentado de 0.8 a 0.9
+                }
+            });
+
+            // Botón de salida: termina la sesión AR
+            document.getElementById('Exit').addEventListener('click', () => {
+                const session = renderer.xr.getSession();
+                if (session) {
+                    session.end().catch(console.error);
+                }
+            });
+        }
+
+        // Manejador de redimensionamiento de ventana
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Modificar los eventos de sesión AR
+        renderer.xr.addEventListener('sessionstart', () => {
+            console.log('Sesión AR iniciada');
+            isPlacing = true;
+            canReposition = true;
+            document.getElementById('placing-instructions').style.display = 'block';
+            document.getElementById('Exit').style.display = 'flex';
+        });
+
+        renderer.xr.addEventListener('sessionend', () => {
+            console.log('Sesión AR terminada');
+            isPlacing = true;
+            canReposition = false;
+            hitTestSourceRequested = false;
+            hitTestSource = null;
+            if (currentModel) currentModel.visible = false;
+            document.getElementById('Exit').style.display = 'none';
+            document.getElementById('placing-instructions').style.display = 'none';
+        });
+
+        // Iniciar la aplicación
+        init().catch(console.error);
+    </script>
+</body>
+</html>

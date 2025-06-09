@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador AR</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            text-align: center;
+        }
+        select, button {
+            font-size: 1.2em;
+            padding: 0.5em;
+            margin: 0.5em 0;
+            width: 100%;
+            max-width: 300px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .error {
+            color: red;
+            margin: 10px 0;
+            padding: 10px;
+            background: #ffe6e6;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Visualizador de Modelos 3D en AR</h2>
+
+        <div id="error" class="error"></div>
+
+        <label for="modelo">Selecciona un Modelo 3D:</label><br>
+        <select id="modelo"></select><br>
+
+        <label for="escenario">Selecciona un Escenario:</label><br>
+        <select id="escenario"></select><br>
+
+        <button id="verBtn">Ver en Realidad Aumentada</button>
+    </div>
+
+    <script src="./js/modelStore.js"></script>
+    <script>
+        function initSelector() {
+            try {
+                const modeloSelect = document.getElementById('modelo');
+                const escenarioSelect = document.getElementById('escenario');
+                const errorDiv = document.getElementById('error');
+
+                if (!window.ModelStore) {
+                    throw new Error('ModelStore no está disponible');
+                }
+
+                // Limpiar selects
+                modeloSelect.innerHTML = '';
+                escenarioSelect.innerHTML = '';
+
+                // Cargar modelos
+                ModelStore.listModelos().forEach(id => {
+                    const modelo = ModelStore.getModelo(id);
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = modelo.nombre;
+                    modeloSelect.appendChild(opt);
+                });
+
+                // Cargar escenarios
+                ModelStore.listEscenarios().forEach(id => {
+                    const escenario = ModelStore.getEscenario(id);
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = escenario.nombre;
+                    escenarioSelect.appendChild(opt);
+                });
+
+                // Manejar redirección
+                document.getElementById('verBtn').addEventListener('click', () => {
+                    const modelo = modeloSelect.value;
+                    const escenario = escenarioSelect.value;
+                    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+                    const targetPage = isMobile ? 'mobile.html' : 'desktop.html';
+                    window.location.href = `${targetPage}?modelo=${modelo}&escenario=${escenario}`;
+                });
+
+                errorDiv.style.display = 'none';
+            } catch (error) {
+                console.error('Error al inicializar:', error);
+                document.getElementById('error').textContent = error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        }
+
+        // Esperar a que el DOM esté listo
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initSelector);
+        } else {
+            initSelector();
+        }
+    </script>
+</body>
+</html>
