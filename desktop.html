@@ -45,11 +45,31 @@
         .control-btn:hover {
             background: #666;
         }
+        #volverBtn {
+            background: #666;
+            margin-right: 10px;
+        }
+        #volverBtn:hover {
+            background: #888;
+        }
+        #arBtn {
+            background: #4CAF50;
+            display: none;  /* Oculto por defecto */
+            color: white;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #arBtn:hover {
+            background: #45a049;
+        }
     </style>
 </head>
 <body>
     <div id="viewer-container"></div>
     <div id="controls-panel">
+        <button class="control-btn" id="volverBtn">← Volver</button>
+        <button class="control-btn" id="arBtn">Ver en AR</button>
         <button class="control-btn" id="resetView">Reset Vista</button>
         <button class="control-btn" id="toggleRotate">Auto Rotar</button>
         <button class="control-btn" id="toggleLight">Ajustar Luz</button>
@@ -59,10 +79,35 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+        async function verificarSoporteAR() {
+            const esMovil = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            
+            if (esMovil && navigator.xr) {
+                try {
+                    const soportaAR = await navigator.xr.isSessionSupported('immersive-ar');
+                    if (soportaAR) {
+                        document.getElementById('arBtn').style.display = 'block';
+                        return true;
+                    }
+                } catch (error) {
+                    console.log('AR no soportado:', error);
+                }
+            }
+            return false;
+        }
+
         async function init() {
             const params = new URLSearchParams(window.location.search);
             const modeloId = params.get('modelo') || 'Capibara';
             const escenarioId = params.get('escenario') || 'miCasa';
+
+            // Verificar soporte AR
+            await verificarSoporteAR();
+
+            // Añadir manejador del botón AR
+            document.getElementById('arBtn').addEventListener('click', () => {
+                window.location.href = `mobile.html?modelo=${modeloId}&escenario=${escenarioId}`;
+            });
 
             const modelo = ModelStore.getModelo(modeloId);
             const escenario = ModelStore.getEscenario(escenarioId);
@@ -188,6 +233,10 @@
             document.getElementById('toggleLight').addEventListener('click', () => {
                 mainLight.intensity = mainLight.intensity === 0.7 ? 0.4 : 0.7;
                 fillLight.intensity = fillLight.intensity === 0.2 ? 0.3 : 0.2;
+            });
+
+            document.getElementById('volverBtn').addEventListener('click', () => {
+                window.location.href = 'index.html';
             });
 
             // Función de animación mejorada

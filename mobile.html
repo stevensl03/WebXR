@@ -72,6 +72,7 @@
             display: none;
             max-width: 80%;
             font-size: 16px;
+            white-space: pre-line; /* Permite saltos de línea en el texto */
         }
         /* Estilo para el botón AR de WebXR */
         #ARButton {
@@ -98,6 +99,33 @@
         #Exit:active {
             background: rgba(220, 50, 50, 0.9);
         }
+
+        /* Add to your existing styles section */
+        #navButtons {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-btn {
+            background: rgba(0,0,0,0.7);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .nav-btn:active {
+            background: rgba(0,0,0,0.9);
+        }
     </style>
 </head>
 <body>
@@ -112,6 +140,13 @@
         <button class="ar-btn" id="scaleUpBtn">+</button>
         <button class="ar-btn" id="scaleDownBtn">-</button>
     </div>
+    <div id="navButtons">
+        <!-- Botones de navegación adicionales -->
+        <button class="nav-btn" id="infoBtn">ℹ️ Información</button>
+        <button class="nav-btn" id="helpBtn">❓ Ayuda</button>
+        <button class="nav-btn" id="indexBtn">🏠 Inicio</button>
+        <button class="nav-btn" id="desktopBtn">🖥️ Vista 3D</button>
+    </div>
 
     <script type="module">
         // Importar librerías necesarias
@@ -124,6 +159,30 @@
         const modeloId = params.get('modelo') || 'Capibara';  // Si no hay modelo especificado, usa Capibara
         const modelo = ModelStore.getModelo(modeloId);        // Obtener datos del modelo desde ModelStore
 
+        // Estado del modelo y AR
+        const ModelState = {
+            // Modelo actual
+            current: null,
+            isPlaced: false,
+            isRotating: false,
+            canReposition: true,
+            
+            // Transformaciones
+            position: new THREE.Vector3(),
+            rotation: new THREE.Euler(),
+            scale: new THREE.Vector3(),
+            
+            // Control táctil
+            touchStartX: 0,
+            touchStartY: 0,
+            
+            // Constantes de configuración
+            INITIAL_HEIGHT: 0.05,
+            INITIAL_SCALE: 0.5,
+            ROTATION_SPEED: 0.01,
+            SCALE_FACTOR: 1.1
+        };
+
         // Variables de estado para el modelo y su posicionamiento
         let currentModel = null;         // Referencia al modelo 3D actual
         let isPlacing = true;           // Indica si estamos en modo de colocación
@@ -135,27 +194,29 @@
         // Configuración de la escena Three.js
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // Mejorar la configuración del renderizador
         const renderer = new THREE.WebGLRenderer({
-            antialias: true,    // Suavizado de bordes
-            alpha: true,        // Fondo transparente para AR
-            canvas: document.getElementById('ar-container')
+            antialias: true,
+            alpha: true,
+            canvas: document.getElementById('ar-container'),
+            powerPreference: 'high-performance',
+            precision: 'highp',
+            logarithmicDepthBuffer: true
         });
 
         // Configuración del renderizador
-        renderer.setPixelRatio(window.devicePixelRatio);  // Ajuste para pantallas de alta densidad
+        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;  // Habilitar soporte para realidad aumentada
+        renderer.xr.enabled = true;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        scene.background = null;
 
         // Configuración del botón AR y sus características
         document.body.appendChild(
             ARButton.createButton(renderer, {
-                requiredFeatures: ['hit-test', 'dom-overlay'],  // Características requeridas
-                domOverlay: { root: document.getElementById('ar-overlay') },  // Overlay para controles
+                requiredFeatures: ['hit-test'],
                 optionalFeatures: ['dom-overlay'],
-                sessionInit: {
-                    requiredFeatures: ['hit-test'],  // Detección de superficies
-                    optionalFeatures: ['dom-overlay']
-                }
+                domOverlay: { root: document.getElementById('ar-overlay') }
             })
         );
 
@@ -184,102 +245,165 @@
         loadingDiv.textContent = 'Cargando modelo...';
         document.body.appendChild(loadingDiv);
 
-        // Función principal de inicialización
+        // Reemplazar la sección de verificación AR existente con:
+        async function checkARSupport() {
+            try {
+                if (!navigator.xr) {
+                    throw new Error('WebXR no está disponible en este navegador');
+                }
+
+                const supported = await navigator.xr.isSessionSupported('immersive-ar');
+                if (!supported) {
+                    throw new Error('AR no está soportado en este dispositivo');
+                }
+
+                return true;
+            } catch (error) {
+                console.error('Error AR:', error);
+                alert('Error: ' + error.message + '\nPor favor:\n- Usa Chrome actualizado\n- Instala ARCore\n- Verifica los permisos de cámara');
+                return false;
+            }
+        }
+
+        // Actualizar la función init
         async function init() {
             try {
-                // Configuración de luces
-                const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);  // Luz ambiente suave
+                const arSupported = await checkARSupport();
+                if (!arSupported) {
+                    throw new Error('AR no disponible');
+                }
+
+                // Configuración básica
+                scene.background = null;
+                renderer.outputEncoding = THREE.sRGBEncoding;
+                renderer.xr.enabled = true;
+
+                // Luces
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
                 scene.add(ambientLight);
 
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);  // Luz direccional principal
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
                 directionalLight.position.set(5, 5, 5);
                 scene.add(directionalLight);
 
-                // Cargar el modelo 3D
-                const modelPromise = loadModel();
-                currentModel = await modelPromise;
+                // Cargar modelo
+                loadingDiv.style.display = 'block';
+                currentModel = await loadModel();
                 
-                if (currentModel) {
-                    scene.add(currentModel);
-                    console.log('Modelo añadido a la escena');
+                if (!currentModel) {
+                    throw new Error('No se pudo cargar el modelo');
                 }
+
+                scene.add(currentModel);
+                loadingDiv.style.display = 'none';
+
+                // Añadir después de la carga del modelo
+                console.log('Estado del modelo:', {
+                    cargado: !!currentModel,
+                    visible: currentModel?.visible,
+                    escala: currentModel?.scale.toArray(),
+                    posicion: currentModel?.position.toArray()
+                });
+
+                // Configurar AR
+                const button = ARButton.createButton(renderer, {
+                    requiredFeatures: ['hit-test'],
+                    optionalFeatures: ['dom-overlay'],
+                    domOverlay: { root: document.getElementById('ar-overlay') },
+                    sessionInit: {
+                        requiredFeatures: ['hit-test'],
+                        optionalFeatures: ['dom-overlay']
+                    }
+                });
+                document.body.appendChild(button);
 
                 // Configurar el bucle de animación
                 renderer.setAnimationLoop((timestamp, frame) => {
-                    if (frame) {
-                        const referenceSpace = renderer.xr.getReferenceSpace();
+                    // Basic render if no frame
+                    if (!frame) {
+                        return renderer.render(scene, camera);
+                    }
 
-                        if (!hitTestSourceRequested) {
-                            const session = renderer.xr.getSession();
-                            session.requestReferenceSpace('viewer').then((viewerSpace) => {
-                                session.requestHitTestSource({ space: viewerSpace }).then((source) => {
-                                    hitTestSource = source;
-                                });
-                            });
-                            hitTestSourceRequested = true;
-                            session.addEventListener('end', () => {
-                                hitTestSourceRequested = false;
-                                hitTestSource = null;
-                                if (currentModel) currentModel.visible = false;
-                            });
-                        }
+                    const session = renderer.xr.getSession();
+                    if (!session) {
+                        return renderer.render(scene, camera);
+                    }
 
-                        // Replace the hit-test section in the animation loop
-                        if (hitTestSource && (isPlacing || canReposition)) {
+                    // Initialize hit test source
+                    if (!hitTestSourceRequested) {
+                        initializeHitTestSource(session);
+                    }
+
+                    // Handle hit testing
+                    if (hitTestSource) {
+                        try {
                             const hitTestResults = frame.getHitTestResults(hitTestSource);
-                            if (hitTestResults.length > 0 && currentModel) {
+                            
+                            if (hitTestResults.length > 0) {
                                 const hit = hitTestResults[0];
+                                const referenceSpace = renderer.xr.getReferenceSpace();
                                 const pose = hit.getPose(referenceSpace);
                                 
-                                // Crear matriz temporal
-                                const tempMatrix = new THREE.Matrix4();
-                                tempMatrix.fromArray(pose.transform.matrix);
-                                
-                                // Ajustar posición para estar más cerca y a una altura adecuada
-                                const position = new THREE.Vector3();
-                                position.setFromMatrixPosition(tempMatrix);
-                                
-                                // Obtener dirección de la cámara
-                                const cameraDirection = new THREE.Vector3(0, 0, -1);
-                                cameraDirection.applyQuaternion(camera.quaternion);
-                                
-                                // Ajustar posición
-                                position.add(cameraDirection.multiplyScalar(INITIAL_DISTANCE));
-                                position.y += INITIAL_HEIGHT;
-                                
-                                if (!currentModel.visible) {
-                                    currentModel.visible = true;
-                                    document.getElementById('placing-instructions').style.display = 'none';
+                                if (pose && currentModel) {
+                                    const matrix = new THREE.Matrix4().fromArray(pose.transform.matrix);
+                                    const position = new THREE.Vector3().setFromMatrixPosition(matrix);
+                                    position.y += INITIAL_HEIGHT;
+                                    
+                                    if (!modelPlaced || canReposition) {
+                                        currentModel.position.copy(position);
+                                        
+                                        if (!currentModel.visible) {
+                                            currentModel.visible = true;
+                                            document.getElementById('placing-instructions').style.display = 'block';
+                                        }
+                                    }
                                 }
-                                
-                                // Aplicar transformación
-                                currentModel.position.copy(position);
-                                currentModel.quaternion.setFromRotationMatrix(tempMatrix);
                             }
+                        } catch (error) {
+                            console.error('Error in hit test:', error);
                         }
                     }
+
+                    // Debug logging
+                    console.log('Frame:', {
+                        hasFrame: !!frame,
+                        hasSession: !!session,
+                        hasHitTest: !!hitTestSource,
+                        modelVisible: currentModel?.visible
+                    });
+
                     renderer.render(scene, camera);
                 });
 
                 // Configurar controles de interfaz
                 setupControls(directionalLight);
 
+                // Add to init function
+                renderer.xr.addEventListener('sessionstart', () => {
+                    console.log('AR Session started');
+                    document.getElementById('placing-instructions').style.display = 'block';
+                });
+
             } catch (error) {
-                console.error('Error initializing AR:', error);
-                loadingDiv.textContent = 'Error cargando el modelo';
-                setTimeout(() => loadingDiv.remove(), 2000);
+                console.error('Error de inicialización:', error);
+                loadingDiv.textContent = 'Error: ' + error.message;
+                setTimeout(() => loadingDiv.remove(), 3000);
             }
         }
 
         // Función para cargar y optimizar el modelo 3D
         async function loadModel() {
-            if (!modelo) return null;
+            if (!modelo) {
+                console.error('No model data available');
+                return null;
+            }
             
+            console.log('Loading model:', modelo.url);
             const loader = new GLTFLoader();
-            loader.setPath(modelo.url.substring(0, modelo.url.lastIndexOf('/') + 1));
             
             try {
-                const gltf = await loader.loadAsync(modelo.url.split('/').pop());
+                const gltf = await loader.loadAsync(modelo.url);
+                console.log('Model loaded successfully:', gltf);
                 const model = gltf.scene;
                 
                 // Aplicar escala base más pequeña
@@ -302,34 +426,61 @@
                 console.log('Modelo cargado exitosamente');
                 return model;
             } catch (error) {
-                console.error('Error cargando modelo:', error);
+                console.error('Model loading failed:', error);
                 return null;
             } finally {
                 loadingDiv.remove();
             }
         }
 
+        // Actualizar las variables de control de rotación
+        let isRotating = false;
+        let startX = 0;
+        let currentRotationY = 0;
+        let modelPlaced = false; // Nueva variable para saber si el modelo está colocado
+
         // Configuración de controles de interfaz
         function setupControls(directionalLight) {
-            // Botón de reinicio: permite reposicionar el modelo
-            document.getElementById('resetBtn').addEventListener('click', () => {
-                canReposition = true;
-                isPlacing = true;
-                if (currentModel) {
-                    currentModel.visible = false;
-                }
-                document.getElementById('placing-instructions').style.display = 'block';
-                document.getElementById('placing-instructions').textContent = 
-                    'Toca donde quieras reposicionar el modelo';
-            });
-
-            // Control táctil: confirma la posición del modelo
+            // Single touchstart listener
             document.addEventListener('touchstart', (event) => {
                 if ((isPlacing || canReposition) && currentModel && currentModel.visible) {
                     isPlacing = false;
                     canReposition = false;
+                    modelPlaced = true;
                     document.getElementById('placing-instructions').style.display = 'none';
+                    lastPosition.copy(currentModel.position);
+                } else if (modelPlaced && currentModel) {
+                    isRotating = true;
+                    startX = event.touches[0].clientX;
+                    currentRotationY = currentModel.rotation.y;
                 }
+            });
+
+            // Single touchmove listener
+            document.addEventListener('touchmove', (event) => {
+                if (isRotating && modelPlaced && currentModel) {
+                    const deltaX = event.touches[0].clientX - startX;
+                    currentModel.rotation.y = currentRotationY + (deltaX * 0.01);
+                }
+            });
+
+            // Single touchend listener
+            document.addEventListener('touchend', () => {
+                isRotating = false;
+            });
+
+            // Botón de reinicio: permite reposicionar el modelo
+            document.getElementById('resetBtn').addEventListener('click', () => {
+                canReposition = true;
+                isPlacing = true;
+                modelPlaced = false;
+                if (currentModel) {
+                    currentModel.visible = false;
+                    currentModel.rotation.y = 0; // Resetear rotación
+                }
+                document.getElementById('placing-instructions').style.display = 'block';
+                document.getElementById('placing-instructions').textContent = 
+                    'Toca donde quieras reposicionar el modelo';
             });
 
             // Control de iluminación: ajusta la intensidad de la luz
@@ -356,6 +507,71 @@
                 if (session) {
                     session.end().catch(console.error);
                 }
+            });
+
+            // Botones de navegación adicionales
+            document.getElementById('infoBtn').addEventListener('click', () => {
+                alert('Información sobre el modelo:\n- Nombre: ' + modeloId + '\n- Escala: ' + modelo.scale + '\n- Posición: ' + modelo.position);
+            });
+
+            document.getElementById('helpBtn').addEventListener('click', () => {
+                alert('Instrucciones de uso:\n1. Mueve tu dispositivo para encontrar una superficie plana.\n2. Toca la pantalla para colocar el modelo.\n3. Usa los botones para ajustar la escala, rotación y posición.\n4. Toca el botón de salida para terminar la sesión AR.');
+            });
+
+            // Botón para ir al índice
+            document.getElementById('indexBtn').addEventListener('click', () => {
+                const session = renderer.xr.getSession();
+                if (session) {
+                    session.end().then(() => {
+                        window.location.href = 'index.html';
+                    }).catch(console.error);
+                } else {
+                    window.location.href = 'index.html';
+                }
+            });
+
+            // Botón para ir a la vista de escritorio
+            document.getElementById('desktopBtn').addEventListener('click', () => {
+                const session = renderer.xr.getSession();
+                if (session) {
+                    session.end().then(() => {
+                        const params = new URLSearchParams(window.location.search);
+                        window.location.href = `desktop.html?modelo=${params.get('modelo')}&escenario=${params.get('escenario')}`;
+                    }).catch(console.error);
+                } else {
+                    const params = new URLSearchParams(window.location.search);
+                    window.location.href = `desktop.html?modelo=${params.get('modelo')}&escenario=${params.get('escenario')}`;
+                }
+            });
+        }
+
+        // Función para configurar los controles táctiles
+        function setupTouchControls() {
+            document.addEventListener('touchstart', (event) => {
+                if (!ModelState.current?.visible) return;
+                
+                if (!ModelState.isPlaced) {
+                    // Colocar modelo
+                    ModelState.isPlaced = true;
+                    ModelState.position.copy(ModelState.current.position);
+                    hideInstructions();
+                } else {
+                    // Iniciar rotación
+                    ModelState.isRotating = true;
+                    ModelState.touchStartX = event.touches[0].clientX;
+                    ModelState.rotation.y = ModelState.current.rotation.y;
+                }
+            });
+
+            document.addEventListener('touchmove', (event) => {
+                if (!ModelState.isPlaced || !ModelState.isRotating) return;
+                
+                const deltaX = event.touches[0].clientX - ModelState.touchStartX;
+                ModelState.current.rotation.y = ModelState.rotation.y + (deltaX * ModelState.ROTATION_SPEED);
+            });
+
+            document.addEventListener('touchend', () => {
+                ModelState.isRotating = false;
             });
         }
 
@@ -385,6 +601,39 @@
             document.getElementById('Exit').style.display = 'none';
             document.getElementById('placing-instructions').style.display = 'none';
         });
+
+        // Add this function before renderer.setAnimationLoop
+        async function initializeHitTestSource(session) {
+            try {
+                console.log('Initializing hit test source...');
+                
+                // Request reference spaces
+                const viewerSpace = await session.requestReferenceSpace('viewer');
+                const referenceSpace = await session.requestReferenceSpace('local');
+                
+                // Set reference space for renderer
+                renderer.xr.setReferenceSpace(referenceSpace);
+                
+                // Request hit test source
+                hitTestSource = await session.requestHitTestSource({
+                    space: viewerSpace
+                });
+                
+                hitTestSourceRequested = true;
+                console.log('Hit test source initialized successfully');
+
+            } catch (error) {
+                console.error('Error initializing hit test source:', error);
+                hitTestSourceRequested = false;
+            }
+
+            // Add session end handler
+            session.addEventListener('end', () => {
+                hitTestSourceRequested = false;
+                hitTestSource = null;
+                if (currentModel) currentModel.visible = false;
+            });
+        }
 
         // Iniciar la aplicación
         init().catch(console.error);
