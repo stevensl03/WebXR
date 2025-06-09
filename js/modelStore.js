@@ -44,22 +44,31 @@ const ModelStore = {
     },
 
     escenarios: {
-        'escena1': {
-            nombre: 'Escena 1',
-            url: './assets/panoramas/01.webp'
+        'zonaNieve': {
+            nombre: 'zonaNieve',
+            url: './assets/panoramas/zonaNieve.webp'
         },
-        'miCasa': {
-            nombre: 'Mi Casa',
-            url: './assets/panoramas/01casa.jpg'
-        },
-        'escena2': {
-            nombre: 'Escena 2',
-            url: './assets/panoramas/02.png'
+        'casa': {
+            nombre: 'casa',
+            url: './assets/panoramas/casa.png'
         },
         'jardin': {
             nombre: 'Jardín',
-            url: './assets/panoramas/03.jpg'
-        }
+            url: './assets/panoramas/jardin.jpg'
+        },
+        'Cancha de Pasto': {
+            nombre: 'Cancha de Pasto',
+            url: './assets/panoramas/zona01.jpg'
+        },
+        'Entrada': {
+            nombre: 'Entrada',
+            url: './assets/panoramas/zona02.jpg'
+        },
+        'zonaCienciasBasicas': {
+            nombre: 'zonaCienciasBasicas',
+            url: './assets/panoramas/zona03.jpg'
+        },
+
     },
 
     getModelo(id) {
